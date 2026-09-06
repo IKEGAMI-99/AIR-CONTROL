@@ -2,6 +2,7 @@ package com.ikegami99.aircontrol
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -72,9 +73,23 @@ class MainActivity : AppCompatActivity() {
         root.addView(statusText, fullWidth(bottom = 18))
 
         root.addView(actionButton("1. カメラ権限") { requestCameraPermission() }, fullWidth())
+
         root.addView(actionButton("2. ユーザー補助設定") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }, fullWidth())
+
+        root.addView(actionButton("アクセス拒否された場合 / 制限付き設定を解除") {
+            showRestrictedSettingsHelp()
+        }, fullWidth())
+
+        root.addView(actionButton("手追跡をテスト（カメラ＋ボーン表示）") {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                requestCameraPermission()
+                Toast.makeText(this, "先にカメラ権限を許可してください", Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(Intent(this, HandTestActivity::class.java))
+            }
+        }, fullWidth(top = 10))
 
         startButton = actionButton("START AIR CONTROL") { startAirControl() }.apply {
             setTextColor(Color.BLACK)
@@ -112,6 +127,29 @@ class MainActivity : AppCompatActivity() {
         setOnClickListener { action() }
     }
 
+    private fun showRestrictedSettingsHelp() {
+        AlertDialog.Builder(this)
+            .setTitle("『アクセスを拒否されました』の解除")
+            .setMessage(
+                "GitHubなどPlayストア以外から入れたAPKは、Android 13以降でユーザー補助が『制限付き設定』としてブロックされることがあります。\n\n" +
+                    "1. 下の『アプリ情報を開く』を押す\n" +
+                    "2. AIR CONTROLのアプリ情報で右上の︙を押す\n" +
+                    "3. 『制限付き設定を許可』を選ぶ\n" +
+                    "4. PIN/指紋などで承認\n" +
+                    "5. AIR CONTROLへ戻り『ユーザー補助設定』をもう一度開く\n\n" +
+                    "これはOS側の保護機能なので、アプリ自身から自動解除することはできません。"
+            )
+            .setPositiveButton("アプリ情報を開く") { _, _ ->
+                val intent = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            }
+            .setNegativeButton("閉じる", null)
+            .show()
+    }
+
     private fun startAirControl() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestCameraPermission()
@@ -147,6 +185,9 @@ class MainActivity : AppCompatActivity() {
             append("TRACKING     : ${if (service) "RUNNING" else "STOPPED"}\n")
             append("GESTURES     : ${if (AirControlService.controlsLocked) "LOCKED" else "ACTIVE"}\n")
             append("VERSION      : ${BuildConfig.VERSION_NAME}")
+            if (!accessibility && Build.VERSION.SDK_INT >= 33) {
+                append("\n\n※『アクセスを拒否されました』と出る場合は、下の\n『アクセス拒否された場合 / 制限付き設定を解除』を使ってください。")
+            }
         }
     }
 
