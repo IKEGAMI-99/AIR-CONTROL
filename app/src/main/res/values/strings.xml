@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AIR CONTROL</string>
+    <string name="accessibility_service_description">手のジェスチャーからタップとスワイプを実行します。画面内容の読み取りや収集は行いません。</string>
+</resources>
