@@ -8,7 +8,8 @@ import kotlin.math.hypot
 
 class GestureEngine(
     private val commandSink: (Command) -> Unit,
-    private val lockedProvider: () -> Boolean
+    private val lockedProvider: () -> Boolean,
+    private val customMatcher: CustomGestureMatcher? = null
 ) {
     enum class Command { SWIPE_UP, SWIPE_DOWN, CENTER_TAP, LIKE, TOGGLE_LOCK }
 
@@ -34,6 +35,24 @@ class GestureEngine(
 
     fun process(result: GestureRecognizerResult) {
         val now = SystemClock.uptimeMillis()
+
+        // Personalized templates get first chance. Matching uses the complete landmark
+        // sequence and DTW, so timing and trajectory do not need to be identical.
+        val custom = customMatcher?.process(result)
+        if (custom != null && now >= gestureCooldownUntil) {
+            if (!lockedProvider() || custom.command == Command.TOGGLE_LOCK) {
+                emit(
+                    custom.command,
+                    "personalized similarity=${custom.similarity} second=${custom.secondBest}"
+                )
+                gestureCooldownUntil = now + CUSTOM_MATCH_COOLDOWN_MS
+                resetPalmTracking(keepSmoothing = true)
+                resetThumbUp()
+                pinchDown = false
+                return
+            }
+        }
+
         val landmarks = result.landmarks().firstOrNull()
         if (landmarks == null || landmarks.size < 21) {
             onNoHand()
@@ -72,11 +91,13 @@ class GestureEngine(
         ).toFloat() / smoothedPalmScale.coerceAtLeast(0.035f)
         val isPinching = pinchRatio < 0.48f
 
-        handleFist(now, gesture, confidence)
+        if (!hasCustom(Command.TOGGLE_LOCK)) {
+            handleFist(now, gesture, confidence)
+        }
 
         if (!lockedProvider()) {
-            handlePinch(isPinching)
-            handleThumbUp(now, gesture, confidence)
+            if (!hasCustom(Command.CENTER_TAP)) handlePinch(isPinching) else pinchDown = isPinching
+            if (!hasCustom(Command.LIKE)) handleThumbUp(now, gesture, confidence) else resetThumbUp()
             handlePalmSwipe(now, gesture, confidence)
         } else {
             pinchDown = isPinching
@@ -85,20 +106,11 @@ class GestureEngine(
         }
     }
 
-    /**
-     * Vertical swipe detection deliberately does not require Open_Palm on every frame.
-     * MediaPipe's gesture category can flicker while the whole hand is moving quickly,
-     * even though the 21 landmarks remain stable. Seeing Open_Palm arms a short grace
-     * window and motion is then measured from the palm centre rather than the wrist.
-     *
-     * Distance is normalized by palm size, so the same physical gesture works whether
-     * the hand is close to or farther from the front camera.
-     */
+    private fun hasCustom(command: Command): Boolean = customMatcher?.hasTemplates(command) == true
+
     private fun handlePalmSwipe(now: Long, gesture: String, confidence: Float) {
         val isOpenPalm = gesture == "Open_Palm" && confidence >= OPEN_PALM_CONFIDENCE
-        if (isOpenPalm) {
-            palmGraceUntil = now + OPEN_PALM_GRACE_MS
-        }
+        if (isOpenPalm) palmGraceUntil = now + OPEN_PALM_GRACE_MS
 
         if (now > palmGraceUntil) {
             resetPalmTracking()
@@ -110,16 +122,12 @@ class GestureEngine(
         }
         if (smoothedPalmX.isNaN() || smoothedPalmY.isNaN() || smoothedPalmScale.isNaN()) return
 
-        palmHistory.addLast(
-            PalmSample(smoothedPalmX, smoothedPalmY, smoothedPalmScale, now)
-        )
+        palmHistory.addLast(PalmSample(smoothedPalmX, smoothedPalmY, smoothedPalmScale, now))
         while (palmHistory.isNotEmpty() && now - palmHistory.first().timeMs > SWIPE_WINDOW_MS) {
             palmHistory.removeFirst()
         }
-
         if (palmHistory.size < 3) return
 
-        // Prefer a point far enough in the past to reject one-frame landmark jitter.
         val start = palmHistory.firstOrNull { now - it.timeMs >= MIN_SWIPE_TIME_MS } ?: return
         val dtMs = now - start.timeMs
         if (dtMs <= 0L) return
@@ -136,18 +144,14 @@ class GestureEngine(
         val enoughSpeed = verticalSpeedPalmPerSec >= MIN_VERTICAL_SPEED_PALMS_PER_SEC
 
         if (enoughDistance && mostlyVertical && enoughSpeed) {
-            if (dyPalm < 0f) {
+            val command = if (dyPalm < 0f) Command.SWIPE_UP else Command.SWIPE_DOWN
+            if (!hasCustom(command)) {
                 emit(
-                    Command.SWIPE_UP,
-                    "palm_swipe dyPalm=$dyPalm dyRaw=$dyRaw speed=$verticalSpeedPalmPerSec conf=$confidence"
+                    command,
+                    "standard palm_swipe dyPalm=$dyPalm dyRaw=$dyRaw speed=$verticalSpeedPalmPerSec conf=$confidence"
                 )
-            } else {
-                emit(
-                    Command.SWIPE_DOWN,
-                    "palm_swipe dyPalm=$dyPalm dyRaw=$dyRaw speed=$verticalSpeedPalmPerSec conf=$confidence"
-                )
+                gestureCooldownUntil = now + SWIPE_COOLDOWN_MS
             }
-            gestureCooldownUntil = now + SWIPE_COOLDOWN_MS
             resetPalmTracking(keepSmoothing = true)
         }
     }
@@ -165,9 +169,7 @@ class GestureEngine(
     }
 
     private fun handlePinch(isPinching: Boolean) {
-        if (isPinching && !pinchDown) {
-            emit(Command.CENTER_TAP, "pinch edge")
-        }
+        if (isPinching && !pinchDown) emit(Command.CENTER_TAP, "standard pinch edge")
         pinchDown = isPinching
     }
 
@@ -177,11 +179,9 @@ class GestureEngine(
             if (!thumbUpFired && now - thumbUpSince >= 500L && now >= gestureCooldownUntil) {
                 thumbUpFired = true
                 gestureCooldownUntil = now + 700L
-                emit(Command.LIKE, "thumb_up hold=${now - thumbUpSince}ms")
+                emit(Command.LIKE, "standard thumb_up hold=${now - thumbUpSince}ms")
             }
-        } else {
-            resetThumbUp()
-        }
+        } else resetThumbUp()
     }
 
     private fun handleFist(now: Long, gesture: String, confidence: Float) {
@@ -190,7 +190,7 @@ class GestureEngine(
             if (!fistFired && now - fistSince >= 900L && now >= gestureCooldownUntil) {
                 fistFired = true
                 gestureCooldownUntil = now + 1_000L
-                emit(Command.TOGGLE_LOCK, "closed_fist hold=${now - fistSince}ms")
+                emit(Command.TOGGLE_LOCK, "standard closed_fist hold=${now - fistSince}ms")
             }
         } else {
             fistSince = 0L
@@ -227,11 +227,9 @@ class GestureEngine(
     }
 
     companion object {
-        // Gesture label may flicker during motion, so Open_Palm only needs to arm tracking.
+        private const val CUSTOM_MATCH_COOLDOWN_MS = 720L
         private const val OPEN_PALM_CONFIDENCE = 0.42f
         private const val OPEN_PALM_GRACE_MS = 320L
-
-        // Roughly half a palm-height of vertical motion is enough to count as a swipe.
         private const val MIN_VERTICAL_PALM_DISTANCE = 0.52f
         private const val MIN_VERTICAL_RAW_DISTANCE = 0.055f
         private const val MIN_VERTICAL_SPEED_PALMS_PER_SEC = 1.05f
@@ -239,7 +237,6 @@ class GestureEngine(
         private const val MIN_SWIPE_TIME_MS = 90L
         private const val SWIPE_WINDOW_MS = 520L
         private const val SWIPE_COOLDOWN_MS = 560L
-
         private const val PALM_SMOOTHING_ALPHA = 0.42f
     }
 }
