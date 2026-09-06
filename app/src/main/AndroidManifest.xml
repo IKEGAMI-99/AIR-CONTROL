@@ -29,6 +29,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".HandTestActivity"
+            android:exported="false" />
+
         <service
             android:name=".AirControlService"
             android:exported="false"
