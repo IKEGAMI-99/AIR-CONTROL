@@ -25,10 +25,12 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var startButton: Button
+    private lateinit var gestureStore: GestureTemplateStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLogger.init(applicationContext)
+        gestureStore = GestureTemplateStore(this)
         AppLogger.i("MainActivity created, version=${BuildConfig.VERSION_NAME}")
         setContentView(buildUi())
         requestNotificationPermissionIfNeeded()
@@ -91,6 +93,18 @@ class MainActivity : AppCompatActivity() {
             }
         }, fullWidth(top = 10))
 
+        root.addView(actionButton("自分のジェスチャーを登録 / 学習") {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                requestCameraPermission()
+                Toast.makeText(this, "先にカメラ権限を許可してください", Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(Intent(this, GestureTrainingActivity::class.java))
+            }
+        }.apply {
+            setTextColor(Color.rgb(170, 255, 196))
+            setBackgroundColor(Color.rgb(25, 67, 36))
+        }, fullWidth())
+
         startButton = actionButton("START AIR CONTROL") { startAirControl() }.apply {
             setTextColor(Color.BLACK)
             setBackgroundColor(Color.rgb(96, 255, 138))
@@ -108,7 +122,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(actionButton("ログを書き出す") { exportLog() }, fullWidth())
 
         root.addView(TextView(this).apply {
-            text = "操作\n✋ 上/下スワイプ → 次/前\n🤏 ピンチ → 再生/一時停止\n👍 0.5秒 → いいね\n✊ 0.9秒 → ロック/解除"
+            text = "操作\n標準: ✋ 上/下スワイプ → 次/前\n🤏 ピンチ → 再生/一時停止\n👍 0.5秒 → いいね\n✊ 0.9秒 → ロック/解除\n\n各操作を自分で登録すると、その操作だけパーソナル類似判定へ切り替わります。"
             textSize = 14f
             setTextColor(Color.rgb(190, 220, 196))
             setPadding(dp(6), dp(20), dp(6), 0)
@@ -179,11 +193,13 @@ class MainActivity : AppCompatActivity() {
         val camera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         val accessibility = AirAccessibilityService.isConnected
         val service = AirControlService.isRunning
+        val customCount = GestureEngine.Command.entries.sumOf { gestureStore.count(it) }
         statusText.text = buildString {
             append("CAMERA       : ${if (camera) "READY" else "NEEDS PERMISSION"}\n")
             append("ACCESSIBILITY: ${if (accessibility) "READY" else "OFF"}\n")
             append("TRACKING     : ${if (service) "RUNNING" else "STOPPED"}\n")
             append("GESTURES     : ${if (AirControlService.controlsLocked) "LOCKED" else "ACTIVE"}\n")
+            append("MY GESTURES  : $customCount samples\n")
             append("VERSION      : ${BuildConfig.VERSION_NAME}")
             if (!accessibility && Build.VERSION.SDK_INT >= 33) {
                 append("\n\n※『アクセスを拒否されました』と出る場合は、下の\n『アクセス拒否された場合 / 制限付き設定を解除』を使ってください。")
@@ -229,9 +245,7 @@ class MainActivity : AppCompatActivity() {
             val uri: Uri = data?.data ?: return
             Thread {
                 val result = AppLogger.exportToUri(this, uri)
-                runOnUiThread {
-                    Toast.makeText(this, result, Toast.LENGTH_LONG).show()
-                }
+                runOnUiThread { Toast.makeText(this, result, Toast.LENGTH_LONG).show() }
             }.start()
         }
     }
