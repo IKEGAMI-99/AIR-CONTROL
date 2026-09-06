@@ -47,8 +47,25 @@ jobs:
       - name: Validate signing key
         run: keytool -list -storetype JKS -keystore app/aircontrol.keystore -storepass aircontrol -alias aircontrol >/dev/null
 
+      - name: Calculate monotonic version code
+        shell: bash
+        run: |
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$RELEASE_VERSION"
+          PATCH="${PATCH%%-*}"
+          VERSION_CODE=$((10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH))
+          if [ "$VERSION_CODE" -lt 100 ]; then VERSION_CODE=$((VERSION_CODE + 100)); fi
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "Release versionName=$RELEASE_VERSION versionCode=$VERSION_CODE"
+
       - name: Build signed release APK
-        run: gradle :app:assembleRelease -PVERSION_NAME="$RELEASE_VERSION" -PVERSION_CODE=${{ github.run_number }} --stacktrace
+        run: gradle :app:assembleRelease -PVERSION_NAME="$RELEASE_VERSION" -PVERSION_CODE="$VERSION_CODE" --stacktrace
+
+      - name: Verify APK signature and manifest
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK" | head -n 5
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk "AIR-CONTROL-v${RELEASE_VERSION}.apk"
