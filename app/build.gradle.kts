@@ -7,8 +7,8 @@ plugins {
 }
 
 val airKeystore = file("aircontrol.keystore")
-val appVersionName = providers.gradleProperty("VERSION_NAME").orElse("0.1.2")
-val appVersionCode = providers.gradleProperty("VERSION_CODE").orElse("3")
+val appVersionName = providers.gradleProperty("VERSION_NAME").orElse("0.1.3")
+val appVersionCode = providers.gradleProperty("VERSION_CODE").orElse("4")
 
 android {
     namespace = "com.ikegami99.aircontrol"
