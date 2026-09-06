@@ -38,7 +38,8 @@ class AirControlService : LifecycleService() {
 
         gestureEngine = GestureEngine(
             commandSink = ::handleCommand,
-            lockedProvider = { controlsLocked }
+            lockedProvider = { controlsLocked },
+            customMatcher = CustomGestureMatcher(this)
         )
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
