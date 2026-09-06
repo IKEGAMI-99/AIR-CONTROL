@@ -23,24 +23,26 @@ class CustomGestureMatcher(context: Context) {
     )
 
     private val store = GestureTemplateStore(context)
+    private val templates = store.all()
     private val history = ArrayDeque<GestureTemplateStore.Frame>()
     private var lastEvalMs = 0L
     private var cooldownUntil = 0L
+    private var latchedCommand: GestureEngine.Command? = null
 
-    fun hasTemplates(command: GestureEngine.Command): Boolean = store.has(command)
+    fun hasTemplates(command: GestureEngine.Command): Boolean = templates.any { it.command == command }
 
     fun process(result: GestureRecognizerResult): Match? {
         val now = SystemClock.uptimeMillis()
         val frame = GestureTemplateStore.extractFrame(result, now)
         if (frame == null) {
             trim(now)
+            latchedCommand = null
             return null
         }
 
         history.addLast(frame)
         trim(now)
 
-        val templates = store.all()
         if (templates.isEmpty()) return null
         if (now < cooldownUntil) return null
         if (now - lastEvalMs < EVAL_INTERVAL_MS) return null
@@ -65,6 +67,16 @@ class CustomGestureMatcher(context: Context) {
             if (sorted.size >= 2) (sorted[0] * 0.68f + sorted[1] * 0.32f) else sorted[0]
         }.entries.sortedByDescending { it.value }
 
+        val latched = latchedCommand
+        if (latched != null) {
+            val latchedScore = ranked.firstOrNull { it.key == latched }?.value ?: 0f
+            if (latchedScore <= REARM_SCORE) {
+                latchedCommand = null
+            } else {
+                return null
+            }
+        }
+
         val best = ranked.first()
         val second = ranked.getOrNull(1)?.value ?: 0f
         val count = commandScores[best.key]?.size ?: 1
@@ -78,6 +90,8 @@ class CustomGestureMatcher(context: Context) {
         if (second > 0f && best.value - second < MIN_WIN_MARGIN) return null
 
         cooldownUntil = now + MATCH_COOLDOWN_MS
+        latchedCommand = best.key
+        history.clear()
         AppLogger.i(
             "Custom gesture matched command=${best.key} score=${best.value} second=$second templates=$count"
         )
@@ -189,6 +203,7 @@ class CustomGestureMatcher(context: Context) {
         private const val MATCH_COOLDOWN_MS = 720L
         private const val MIN_CANDIDATE_FRAMES = 6
         private const val MIN_WIN_MARGIN = 0.045f
+        private const val REARM_SCORE = 0.43f
         private const val MOTION_GESTURE_THRESHOLD = 0.34f
         private const val ENDPOINT_WEIGHT = 0.30f
         private const val DISTANCE_TO_SCORE = 1.42f
