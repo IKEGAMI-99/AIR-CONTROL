@@ -31,7 +31,9 @@ class HandTestActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: HandOverlayView
     private lateinit var statusText: TextView
+    private lateinit var engineEventText: TextView
     private lateinit var analyzerExecutor: ExecutorService
+    private lateinit var testGestureEngine: GestureEngine
     private var cameraProvider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizerHelper? = null
     private var lastSubmittedFrame = 0L
@@ -49,6 +51,24 @@ class HandTestActivity : AppCompatActivity() {
 
         analyzerExecutor = Executors.newSingleThreadExecutor()
         setContentView(buildUi())
+
+        // The test screen runs exactly the same GestureEngine as the background service,
+        // but the command sink only displays the result and never touches the OS.
+        testGestureEngine = GestureEngine(
+            commandSink = { command ->
+                runOnUiThread {
+                    engineEventText.text = when (command) {
+                        GestureEngine.Command.SWIPE_UP -> "ENGINE: ↑ SWIPE UP DETECTED ✓"
+                        GestureEngine.Command.SWIPE_DOWN -> "ENGINE: ↓ SWIPE DOWN DETECTED ✓"
+                        GestureEngine.Command.CENTER_TAP -> "ENGINE: PINCH / TAP DETECTED ✓"
+                        GestureEngine.Command.LIKE -> "ENGINE: THUMB UP / LIKE DETECTED ✓"
+                        GestureEngine.Command.TOGGLE_LOCK -> "ENGINE: FIST / LOCK DETECTED ✓"
+                    }
+                    engineEventText.setTextColor(Color.rgb(96, 255, 138))
+                }
+            },
+            lockedProvider = { false }
+        )
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startTrackingTest()
@@ -111,7 +131,23 @@ class HandTestActivity : AppCompatActivity() {
             setBackgroundColor(Color.rgb(12, 32, 18))
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
-        root.addView(statusText, fullWidth(bottom = 8))
+        root.addView(statusText, fullWidth(bottom = 6))
+
+        engineEventText = TextView(this).apply {
+            text = "ENGINE: 手のひらを上下へ軽く払ってください"
+            textSize = 14f
+            setTextColor(Color.rgb(190, 220, 196))
+            setBackgroundColor(Color.rgb(10, 24, 14))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        root.addView(engineEventText, fullWidth(bottom = 4))
+
+        root.addView(TextView(this).apply {
+            text = "SWIPE TEST: 手を開いた状態から、手のひら半個〜1個分くらいを上下に払うだけで判定します。Open_Palm表示が途中で一瞬消えても追跡は継続します。"
+            textSize = 12f
+            setTextColor(Color.rgb(150, 190, 160))
+            setPadding(dp(4), dp(4), dp(4), dp(8))
+        }, fullWidth(bottom = 4))
 
         root.addView(Button(this).apply {
             text = "閉じる"
@@ -191,6 +227,9 @@ class HandTestActivity : AppCompatActivity() {
         val category = result.gestures().firstOrNull()?.firstOrNull()
         val gesture = category?.categoryName() ?: "None"
         val confidence = category?.score() ?: 0f
+
+        // Same detector used by the actual service. Commands are display-only here.
+        testGestureEngine.process(result)
 
         runOnUiThread {
             overlayView.update(result)
