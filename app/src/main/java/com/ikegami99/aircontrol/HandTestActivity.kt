@@ -52,22 +52,21 @@ class HandTestActivity : AppCompatActivity() {
         analyzerExecutor = Executors.newSingleThreadExecutor()
         setContentView(buildUi())
 
-        // The test screen runs exactly the same GestureEngine as the background service,
-        // but the command sink only displays the result and never touches the OS.
         testGestureEngine = GestureEngine(
             commandSink = { command ->
                 runOnUiThread {
                     engineEventText.text = when (command) {
-                        GestureEngine.Command.SWIPE_UP -> "ENGINE: ↑ SWIPE UP DETECTED ✓"
-                        GestureEngine.Command.SWIPE_DOWN -> "ENGINE: ↓ SWIPE DOWN DETECTED ✓"
-                        GestureEngine.Command.CENTER_TAP -> "ENGINE: PINCH / TAP DETECTED ✓"
-                        GestureEngine.Command.LIKE -> "ENGINE: THUMB UP / LIKE DETECTED ✓"
-                        GestureEngine.Command.TOGGLE_LOCK -> "ENGINE: FIST / LOCK DETECTED ✓"
+                        GestureEngine.Command.SWIPE_UP -> "ENGINE: ↑ NEXT / SWIPE UP DETECTED ✓"
+                        GestureEngine.Command.SWIPE_DOWN -> "ENGINE: ↓ PREVIOUS / SWIPE DOWN DETECTED ✓"
+                        GestureEngine.Command.CENTER_TAP -> "ENGINE: PLAY / PAUSE DETECTED ✓"
+                        GestureEngine.Command.LIKE -> "ENGINE: LIKE DETECTED ✓"
+                        GestureEngine.Command.TOGGLE_LOCK -> "ENGINE: LOCK TOGGLE DETECTED ✓"
                     }
                     engineEventText.setTextColor(Color.rgb(96, 255, 138))
                 }
             },
-            lockedProvider = { false }
+            lockedProvider = { false },
+            customMatcher = CustomGestureMatcher(this)
         )
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -93,28 +92,20 @@ class HandTestActivity : AppCompatActivity() {
         }, fullWidth(bottom = 4))
 
         root.addView(TextView(this).apply {
-            text = "手の上に21点のランドマークと骨格線が出ればMediaPipeは正常です"
+            text = "21点ボーン表示 + 実際の標準/パーソナルGestureEngineをテストします"
             textSize = 12f
             setTextColor(Color.rgb(180, 215, 188))
             gravity = Gravity.CENTER
         }, fullWidth(bottom = 10))
 
-        val cameraFrame = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-        }
+        val cameraFrame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         previewView = PreviewView(this).apply {
             scaleType = PreviewView.ScaleType.FIT_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
         overlayView = HandOverlayView(this)
-        cameraFrame.addView(
-            previewView,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        )
-        cameraFrame.addView(
-            overlayView,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        )
+        cameraFrame.addView(previewView, FrameLayout.LayoutParams(-1, -1))
+        cameraFrame.addView(overlayView, FrameLayout.LayoutParams(-1, -1))
 
         val cameraHeight = (resources.displayMetrics.widthPixels * 4f / 3f).toInt()
         root.addView(
@@ -134,7 +125,7 @@ class HandTestActivity : AppCompatActivity() {
         root.addView(statusText, fullWidth(bottom = 6))
 
         engineEventText = TextView(this).apply {
-            text = "ENGINE: 手のひらを上下へ軽く払ってください"
+            text = "ENGINE: 登録済みなら自分のジェスチャー、未登録なら標準ジェスチャーを試してください"
             textSize = 14f
             setTextColor(Color.rgb(190, 220, 196))
             setBackgroundColor(Color.rgb(10, 24, 14))
@@ -143,7 +134,7 @@ class HandTestActivity : AppCompatActivity() {
         root.addView(engineEventText, fullWidth(bottom = 4))
 
         root.addView(TextView(this).apply {
-            text = "SWIPE TEST: 手を開いた状態から、手のひら半個〜1個分くらいを上下に払うだけで判定します。Open_Palm表示が途中で一瞬消えても追跡は継続します。"
+            text = "MY GESTURES: 登録済みの操作はDTW類似判定が優先されます。速度・軌道・手の角度が少し違っても一致できます。"
             textSize = 12f
             setTextColor(Color.rgb(150, 190, 160))
             setPadding(dp(4), dp(4), dp(4), dp(8))
@@ -182,10 +173,7 @@ class HandTestActivity : AppCompatActivity() {
                 val provider = future.get()
                 cameraProvider = provider
 
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-
+                val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
@@ -199,20 +187,11 @@ class HandTestActivity : AppCompatActivity() {
                     }
                     lastSubmittedFrame = now
                     val helper = recognizer
-                    if (helper == null) {
-                        imageProxy.close()
-                    } else {
-                        helper.recognize(imageProxy)
-                    }
+                    if (helper == null) imageProxy.close() else helper.recognize(imageProxy)
                 }
 
                 provider.unbindAll()
-                provider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview,
-                    analysis
-                )
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
                 statusText.text = "CAMERA: READY  /  手をカメラに向けてください"
                 AppLogger.i("Hand test front camera bound")
             } catch (t: Throwable) {
@@ -228,7 +207,6 @@ class HandTestActivity : AppCompatActivity() {
         val gesture = category?.categoryName() ?: "None"
         val confidence = category?.score() ?: 0f
 
-        // Same detector used by the actual service. Commands are display-only here.
         testGestureEngine.process(result)
 
         runOnUiThread {
@@ -248,11 +226,8 @@ class HandTestActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_CAMERA) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-                startTrackingTest()
-            } else {
-                statusText.text = "カメラ権限が必要です"
-            }
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startTrackingTest()
+            else statusText.text = "カメラ権限が必要です"
         }
     }
 
