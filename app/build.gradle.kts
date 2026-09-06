@@ -7,8 +7,8 @@ plugins {
 }
 
 val airKeystore = file("aircontrol.keystore")
-val appVersionName = providers.gradleProperty("VERSION_NAME").orElse("0.1.0")
-val appVersionCode = providers.gradleProperty("VERSION_CODE").orElse("1")
+val appVersionName = providers.gradleProperty("VERSION_NAME").orElse("0.1.1")
+val appVersionCode = providers.gradleProperty("VERSION_CODE").orElse("2")
 
 android {
     namespace = "com.ikegami99.aircontrol"
@@ -92,6 +92,7 @@ dependencies {
     implementation("androidx.camera:camera-core:$cameraX")
     implementation("androidx.camera:camera-camera2:$cameraX")
     implementation("androidx.camera:camera-lifecycle:$cameraX")
+    implementation("androidx.camera:camera-view:$cameraX")
 
     implementation("com.google.mediapipe:tasks-vision:1.0.0")
 }
