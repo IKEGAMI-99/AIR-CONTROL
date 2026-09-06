@@ -50,14 +50,17 @@ class CustomGestureMatcher(context: Context) {
 
         val commandScores = mutableMapOf<GestureEngine.Command, MutableList<Float>>()
         templates.forEach { template ->
-            val bestForTemplate = candidateDurations(template.durationMs)
-                .mapNotNull { duration ->
-                    val candidate = history.filter { now - it.timeMs <= duration }
-                    if (candidate.size < MIN_CANDIDATE_FRAMES) null
-                    else similarity(template.frames, candidate)
+            var bestForTemplate: Float? = null
+            for (duration in candidateDurations(template.durationMs)) {
+                val candidate = history.filter { now - it.timeMs <= duration }
+                if (candidate.size < MIN_CANDIDATE_FRAMES) continue
+                val score = similarity(template.frames, candidate)
+                if (score > (bestForTemplate ?: -1f)) {
+                    bestForTemplate = score
                 }
-                .maxOrNull() ?: return@forEach
-            commandScores.getOrPut(template.command) { mutableListOf() }.add(bestForTemplate)
+            }
+            val bestScore = bestForTemplate ?: return@forEach
+            commandScores.getOrPut(template.command) { mutableListOf() }.add(bestScore)
         }
 
         if (commandScores.isEmpty()) return null
