@@ -1,6 +1,10 @@
 name: Release APK
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'release/initial-v0.1.0'
   workflow_dispatch:
     inputs:
       version:
@@ -10,6 +14,9 @@ on:
 
 permissions:
   contents: write
+
+env:
+  RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '0.1.0' }}
 
 jobs:
   release:
@@ -37,17 +44,20 @@ jobs:
       - name: Restore personal signing key
         run: base64 -d ci/aircontrol.keystore.b64 > app/aircontrol.keystore
 
+      - name: Validate signing key
+        run: keytool -list -storetype JKS -keystore app/aircontrol.keystore -storepass aircontrol -alias aircontrol >/dev/null
+
       - name: Build signed release APK
-        run: gradle :app:assembleRelease -PVERSION_NAME=${{ inputs.version }} -PVERSION_CODE=${{ github.run_number }} --stacktrace
+        run: gradle :app:assembleRelease -PVERSION_NAME="$RELEASE_VERSION" -PVERSION_CODE=${{ github.run_number }} --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk "AIR-CONTROL-v${{ inputs.version }}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk "AIR-CONTROL-v${RELEASE_VERSION}.apk"
 
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v${{ inputs.version }}
-          APK: AIR-CONTROL-v${{ inputs.version }}.apk
+          TAG: v${{ env.RELEASE_VERSION }}
+          APK: AIR-CONTROL-v${{ env.RELEASE_VERSION }}.apk
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" --clobber
