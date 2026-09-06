@@ -33,6 +33,10 @@
             android:name=".HandTestActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".GestureTrainingActivity"
+            android:exported="false" />
+
         <service
             android:name=".AirControlService"
             android:exported="false"
